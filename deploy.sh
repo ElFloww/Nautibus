@@ -11,11 +11,13 @@
 # Prérequis LXC (sur l'hôte Proxmox, conteneur arrêté) :
 #   pct set <ID> --features nesting=1,keyctl=1     (Docker dans LXC)
 #   au moins 4 Go de RAM (SQL Server en demande 2 à lui seul) et 20 Go de disque.
+#
+# HTTPS : assuré par Nginx Proxy Manager. Proxy host : domaine public → http://<IP de ce serveur>:<HTTP_PORT>,
+# « Websockets Support » activé, certificat Let's Encrypt avec « Force SSL » et « HSTS ».
 set -euo pipefail
 
 cd "$(dirname "$(readlink -f "$0")")"
 ENV_FILE=.env
-CADDYFILE=deploy/Caddyfile
 COMPOSE=(docker compose --env-file "$ENV_FILE")
 
 info()  { printf '\033[1;34m▶ %s\033[0m\n' "$*"; }
@@ -57,11 +59,11 @@ configure() {
     return
   fi
   info "Configuration (laisser vide pour la valeur proposée)"
-  local v_Ip v_Site v_Email v_SmtpHost v_SmtpUser v_SmtpPassword v_SmtpFrom v_SmtpPort
-  v_Ip=$(hostname -I 2>/dev/null | awk '{print $1}')
-  read -r -p "Nom de domaine public (ex. nautibus.mondomaine.fr), ou vide pour l'adresse IP ${v_Ip} : " v_Site
-  read -r -p "E-mail de contact (certificat HTTPS et notifications push) : " v_Email
-  [ -n "$v_Email" ] || fail "L'e-mail de contact est obligatoire (exigé par Let's Encrypt et les services push)."
+  local v_Site v_Port v_Email v_SmtpHost v_SmtpUser v_SmtpPassword v_SmtpFrom v_SmtpPort
+  read -r -p "Nom de domaine public servi par Nginx Proxy Manager (ex. nautibus.mondomaine.fr) : " v_Site
+  [ -n "$v_Site" ] || fail "Le domaine est obligatoire (adresse des liens envoyés par e-mail, cookies sécurisés)."
+  read -r -p "Port HTTP local, cible du proxy NPM [8080] : " v_Port
+  read -r -p "E-mail de contact des services push (vide : l'URL du site est utilisée) : " v_Email
   echo "Envoi d'e-mails (confirmation de compte, mot de passe oublié) — vide pour désactiver :"
   read -r -p "  Serveur SMTP : " v_SmtpHost
   if [ -n "$v_SmtpHost" ]; then
@@ -71,14 +73,18 @@ configure() {
     read -r -p "  Adresse d'expédition : " v_SmtpFrom
   fi
 
-  local v_PublicUrl="https://${v_Site:-$v_Ip}"
+  local v_PublicUrl="https://${v_Site}"
+  local v_PushSubject="$v_PublicUrl"
+  [ -z "$v_Email" ] || v_PushSubject="mailto:${v_Email}"
   umask 077
   cat >"$ENV_FILE" <<EOF
 # Généré par deploy.sh le $(date -Iseconds). Contient des secrets : ne pas partager ni versionner.
 SITE_ADDRESS=${v_Site}
-SITE_IP=${v_Ip}
 PUBLIC_URL=${v_PublicUrl}
-ADMIN_EMAIL=${v_Email}
+# Port publié par le service web (HTTP), à renseigner dans le proxy host NPM.
+HTTP_PORT=${v_Port:-8080}
+# Adresse d'écoute : 0.0.0.0 = toutes. Mettre 127.0.0.1 si NPM tourne sur cette même machine hors Docker.
+HTTP_BIND=0.0.0.0
 
 DB_NAME=Nautibus
 DB_APP_USER=nautibus_app
@@ -92,42 +98,20 @@ SMTP_USER=${v_SmtpUser:-}
 SMTP_PASSWORD=${v_SmtpPassword:-}
 SMTP_FROM=${v_SmtpFrom:-}
 
-PUSH_SUBJECT=mailto:${v_Email}
+PUSH_SUBJECT=${v_PushSubject}
 PUSH_PUBLIC_KEY=
 PUSH_PRIVATE_KEY=
 EOF
   ok "Configuration écrite dans $ENV_FILE (droits 600)."
 }
 
-write_caddyfile() {
-  local v_Site v_Email
-  v_Site=$(env_get SITE_ADDRESS)
-  v_Email=$(env_get ADMIN_EMAIL)
-  {
-    # Options globales : e-mail du compte Let's Encrypt (facultatif).
-    [ -z "$v_Email" ] || printf '{\n\temail %s\n}\n\n' "$v_Email"
-    # Le bloc réutilisable doit précéder les sites qui l'importent.
-    printf '%s\n' '(nautibus) {' \
-      '	encode zstd gzip' \
-      '	header {' \
-      '		Strict-Transport-Security "max-age=31536000"' \
-      '		X-Content-Type-Options nosniff' \
-      '		Referrer-Policy strict-origin-when-cross-origin' \
-      '	}' \
-      '	@api path /api/* /hubs/* /health' \
-      '	reverse_proxy @api api:8080' \
-      '	reverse_proxy web:80' \
-      '}' ''
-    if [ -n "$v_Site" ]; then
-      # Domaine public : certificat Let's Encrypt automatique (ports 80 et 443 joignables depuis Internet).
-      printf '%s {\n\timport nautibus\n}\n' "$v_Site"
-    else
-      # Réseau local : autorité interne de Caddy (avertissement du navigateur tant qu'elle n'est pas approuvée).
-      printf 'https://%s, https://localhost {\n\ttls internal\n\timport nautibus\n}\n' "$(env_get SITE_IP)"
-    fi
-  } >"$CADDYFILE"
-  ok "Proxy HTTPS configuré ($CADDYFILE)."
+# .env antérieurs (proxy Caddy intégré) : ajout des réglages du port HTTP servi à Nginx Proxy Manager.
+upgrade_env() {
+  grep -qE '^HTTP_PORT=' "$ENV_FILE" || printf '\n# Port publié par le service web (HTTP), cible du proxy host NPM.\nHTTP_PORT=8080\n' >>"$ENV_FILE"
+  grep -qE '^HTTP_BIND=' "$ENV_FILE" || printf 'HTTP_BIND=0.0.0.0\n' >>"$ENV_FILE"
 }
+
+http_port() { local v_Port; v_Port=$(env_get HTTP_PORT || true); printf '%s' "${v_Port:-8080}"; }
 
 generate_push_keys() {
   [ -z "$(env_get PUSH_PUBLIC_KEY)" ] || return 0
@@ -157,8 +141,9 @@ deploy_database() {
 wait_healthy() {
   info "Attente du démarrage de l'application"
   for _ in $(seq 1 60); do
-    if "${COMPOSE[@]}" exec -T caddy wget -q -O /dev/null "http://api:8080/api/v1/vehicles/status" 2>/dev/null; then
-      ok "Nautibus répond : $(env_get PUBLIC_URL)"
+    if "${COMPOSE[@]}" exec -T web wget -q -O /dev/null "http://localhost/api/v1/vehicles/status" 2>/dev/null; then
+      ok "Nautibus répond en HTTP sur le port $(http_port)."
+      echo "  Nginx Proxy Manager : $(env_get SITE_ADDRESS || true) → http://<IP de ce serveur>:$(http_port), websockets activés, SSL forcé."
       echo "  Le premier import des horaires prend une à deux minutes ; le temps réel suit."
       return 0
     fi
@@ -186,7 +171,7 @@ case "${1:-}" in
   install)
     check_host
     configure
-    write_caddyfile
+    upgrade_env
     info "Construction des images (plusieurs minutes la première fois)"
     "${COMPOSE[@]}" build
     generate_push_keys
@@ -197,7 +182,7 @@ case "${1:-}" in
   update)
     check_host
     [ -f "$ENV_FILE" ] || fail "Pas de configuration : lancer d'abord ./deploy.sh install"
-    write_caddyfile
+    upgrade_env
     "${COMPOSE[@]}" build --pull
     backup
     deploy_database
@@ -207,12 +192,12 @@ case "${1:-}" in
   backup) backup ;;
   status)
     "${COMPOSE[@]}" ps
-    "${COMPOSE[@]}" exec -T caddy wget -q -O - http://api:8080/health 2>/dev/null | head -c 2000; echo
+    "${COMPOSE[@]}" exec -T web wget -q -O - http://localhost/health 2>/dev/null | head -c 2000; echo
     ;;
   logs) "${COMPOSE[@]}" logs -f --tail=100 ;;
   stop) "${COMPOSE[@]}" down ;;
   *)
-    sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
     exit 1
     ;;
 esac

@@ -178,7 +178,7 @@ namespace AmetisAPI.API
                 return v_Config;
             });
 
-            // Derrière le proxy HTTPS (Caddy) : adresse IP et schéma réels du client. Le port de l'API n'est joignable
+            // Derrière le proxy HTTPS (Nginx Proxy Manager, puis nginx du service web) : adresse IP et schéma réels du client. Le port de l'API n'est joignable
             // que depuis le réseau Docker interne, d'où la confiance accordée à tout proxy de ce réseau.
             bool v_BehindProxy = v_Builder.Configuration.GetValue<bool>("ReverseProxy:Enabled");
             if (v_BehindProxy)

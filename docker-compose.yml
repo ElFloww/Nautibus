@@ -1,12 +1,13 @@
 # Nautibus — déploiement complet (LXC Proxmox ou tout hôte Docker x86_64).
-# Prérequis : fichier .env et deploy/Caddyfile (générés par ./deploy.sh install). Ensuite « docker compose up -d --build » suffit :
+# Prérequis : fichier .env (généré par ./deploy.sh install). Ensuite « docker compose up -d --build » suffit :
 # le schéma de la base et le compte SQL applicatif sont mis à jour à chaque démarrage (db-init, db-user).
 #
-#   Internet ─► caddy (80/443, HTTPS) ─┬─► web  (nginx, fichiers du site)
-#                                       └─► api  (/api, /hubs, /health) ─► sqlserver, redis
-#                                 worker (imports GTFS, collecte temps réel, notifications) ─► sqlserver, redis
+#   Internet ─► Nginx Proxy Manager (HTTPS, hors de ce fichier) ─► web (nginx, HTTP_PORT) ─┬─► fichiers du site
+#                                                                                         └─► api (/api, /hubs, /health) ─► sqlserver, redis
+#   worker (imports GTFS, collecte temps réel, notifications) ─► sqlserver, redis
 #
-# Seul Caddy publie des ports ; les autres services ne sont joignables que sur le réseau Docker interne.
+# Seul « web » publie un port (HTTP, par défaut 8080) : c'est la cible du proxy host NPM, websockets activés.
+# Les autres services ne sont joignables que sur le réseau Docker interne.
 
 x-dotnet-env: &dotnet-env
   ConnectionStrings__Database: "Server=sqlserver;Database=${DB_NAME};User Id=${DB_APP_USER};Password=${DB_APP_PASSWORD};TrustServerCertificate=True;Encrypt=True"
@@ -141,19 +142,11 @@ services:
   web:
     build:
       context: frontend
-    restart: unless-stopped
-
-  caddy:
-    image: caddy:2
     ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
-    volumes:
-      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on: [api, web]
+      # HTTP_BIND : adresse d'écoute sur l'hôte. Restreindre à l'IP joignable par NPM si possible :
+      # l'API se fie aux en-têtes X-Forwarded-* reçus sur ce port.
+      - "${HTTP_BIND:-0.0.0.0}:${HTTP_PORT:-8080}:80"
+    depends_on: [api]
     restart: unless-stopped
 
 volumes:
@@ -161,5 +154,3 @@ volumes:
   logs:
   dpkeys:
   sqlpackage:
-  caddy_data:
-  caddy_config:
