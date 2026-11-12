@@ -1,0 +1,1 @@
+CREATE SCHEMA [gtfs] AUTHORIZATION [dbo];

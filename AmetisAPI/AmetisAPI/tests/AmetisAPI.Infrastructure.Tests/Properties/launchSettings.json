@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "AmetisAPI.Infrastructure.Tests": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "DACPACPATH": "..\\\\..\\\\..\\\\..\\\\..\\\\src\\\\AmetisAPI.Database\\\\bin\\\\Debug\\\\AmetisAPI.Database.dacpac"
+      }
+    }
+  }
+}

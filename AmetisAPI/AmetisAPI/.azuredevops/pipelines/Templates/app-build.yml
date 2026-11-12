@@ -1,0 +1,35 @@
+# Job template - Build Web Project
+parameters:
+  buildConfiguration: ""
+  solutionName: ""
+  appBuildArtifactName: ""
+  publishArtifact: false
+steps:
+  # Init in Powershell
+  - template: initialization.yml
+  # Restore .NET packages
+  - task: DotNetCoreCLI@2
+    displayName: Restore NuGet packages
+    inputs:
+      command: restore
+      arguments: --interactive --force-evaluate --locked-mode /nologo
+      projects: ${{ parameters.solutionName }}.slnx
+  # Build Project
+  - task: DotNetCoreCLI@2
+    displayName: "Build application ${{ parameters.solutionName }}.API"
+    inputs:
+      command: build
+      arguments: "--configuration ${{ parameters.buildConfiguration }} --no-restore"
+      projects: src/${{ parameters.solutionName }}.API/${{ parameters.solutionName }}.API.csproj
+  - task: ArchiveFiles@2
+    condition: and(succeeded(),${{ parameters.publishArtifact }})
+    displayName: "Archive files"
+    inputs:
+      rootFolderOrFile: "$(System.DefaultWorkingDirectory)"
+      archiveFile: "$(System.DefaultWorkingDirectory)/${{ parameters.appBuildArtifactName }}.zip"
+  - task: PublishBuildArtifacts@1
+    condition: and(succeeded(),${{ parameters.publishArtifact }})
+    inputs:
+      PathtoPublish: $(System.DefaultWorkingDirectory)/${{ parameters.appBuildArtifactName }}.zip
+      ArtifactName: ${{ parameters.appBuildArtifactName }}
+      publishLocation: "Container"

@@ -1,0 +1,85 @@
+# Job template - Build Web Project
+parameters:
+  scServiceConnection: ""
+  scProjectKey: ""
+  sonarDotnetScannerVersion: ""
+  buildConfiguration: ""
+  solutionName: ""
+  appBuildArtifactName: ""
+  dbArtifactName: ""
+  publishArtifact: false
+  publishTestResult: false
+
+steps:
+  - task: PowerShell@2
+    displayName: "Set Branch name for Sonar"
+    #https://docs.sonarqube.org/latest/branches/overview/
+    #https://docs.sonarqube.org/latest/analysis/pull-request/
+    inputs:
+      targetType: "inline"
+      pwsh: true
+      script: |
+        if ($env:BUILD_REASON -eq 'PullRequest'){
+          $branch = $Env:SYSTEM_PULLREQUEST_SOURCEBRANCH
+          $key = $Env:SYSTEM_PULLREQUEST_PULLREQUESTID
+          $targetBranch = $Env:SYSTEM_PULLREQUEST_TARGETBRANCHNAME
+          Write-Host "##vso[task.setvariable variable=sonarBranchExtraProperty]sonar.pullrequest.branch=$branch"
+          Write-Host "##vso[task.setvariable variable=sonarTargetKeyExtraProperty]sonar.pullrequest.key=$key"
+          Write-Host "##vso[task.setvariable variable=sonarTargetBranchExtraProperty]sonar.pullrequest.base=$targetBranch"
+        }
+        else{
+          $branch = $Env:BUILD_SOURCEBRANCHNAME;
+          Write-Host "##vso[task.setvariable variable=sonarBranchExtraProperty]sonar.branch.name=$branch"
+        }
+        Write-Host $branch
+
+  # Prepare Analysis Configuration task
+  - task: SonarQubePrepare@7
+    inputs:
+      SonarQube: "${{ parameters.scServiceConnection }}"
+      scannerMode: "dotnet"
+      msBuildVersion: "${{ parameters.sonarDotnetScannerVersion }}"
+      projectKey: "${{ parameters.scProjectKey }}"
+      extraProperties: |
+        sonar.cs.opencover.reportsPaths="$(Agent.TempDirectory)/**/*.opencover.xml"
+        sonar.cs.vscoveragexml.reportsPaths="$(Agent.TempDirectory)/**/*.coveragexml" 
+        sonar.cs.vstest.reportsPaths="$(Agent.TempDirectory)/**/*.trx"
+        #sonar.exclusions=
+        sonar.coverage.exclusions=**/*.sql
+        sonar.tsql.file.suffixes=.sql,.tsql
+        sonar.plsql.file.suffixes=.plsql,.pks,.pkb
+        $(sonarBranchExtraProperty)
+        $(sonarTargetKeyExtraProperty)
+        $(sonarTargetBranchExtraProperty)
+
+  # build compiled project
+  - template: app-build.yml
+    parameters:
+      buildConfiguration: ${{ parameters.buildConfiguration }}
+      solutionName: ${{ parameters.solutionName }}
+      appBuildArtifactName: ${{ parameters.appBuildArtifactName }}
+      publishArtifact: ${{ parameters.publishArtifact }}
+  # build database
+  - template: database-build.yml
+    parameters:
+      buildConfiguration: ${{ parameters.buildConfiguration }}
+      solutionName: ${{ parameters.solutionName }}
+      dbArtifactName: ${{ parameters.dbArtifactName }}
+      publishArtifact: ${{ parameters.publishArtifact }}
+  # build and run tests
+  - template: app-test.yml
+    parameters:
+      buildConfiguration: ${{ parameters.buildConfiguration }}
+      solutionName: ${{ parameters.solutionName }}
+      appBuildArtifactName: ${{ parameters.appBuildArtifactName }}
+      dbArtifactName: ${{ parameters.dbArtifactName }}
+      publishTestResult: ${{ parameters.publishTestResult }}
+      downloadSources: false
+
+  # Run Code Analysis task
+  - task: SonarQubeAnalyze@7
+
+  # Publish Quality Gate Result task
+  - task: SonarQubePublish@7
+    inputs:
+      pollingTimeoutSec: "300"

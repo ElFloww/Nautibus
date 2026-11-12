@@ -1,0 +1,8 @@
+﻿using AmetisAPI.Core.Responses.Crud;
+using AmetisAPI.Domain.Bo.Crud;
+
+namespace AmetisAPI.Core.Requests.Crud
+{
+    public record EntityGetRequest<T>(int EntityId) : IQuery<EntityResponse<T>>
+        where T : class, IBoEntity;
+}

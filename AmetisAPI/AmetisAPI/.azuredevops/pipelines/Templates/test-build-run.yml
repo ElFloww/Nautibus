@@ -1,0 +1,31 @@
+parameters:
+    downloadSources: ''
+    buildConfiguration: ''
+    projectName: ''
+
+steps:
+  # Restore .NET packages
+  - task: DotNetCoreCLI@2
+    condition: ${{ parameters.downloadSources }}  
+    displayName: "restore Nuget ${{ parameters.projectName }}.Tests"
+    inputs:
+      command: restore
+      arguments: --interactive --force-evaluate --locked-mode /nologo
+      projects: tests/${{ parameters.projectName }}.Tests/${{ parameters.projectName }}.Tests.csproj
+
+  # Run .NET tests
+  - task: DotNetCoreCLI@2
+    displayName: "dotnet build ${{ parameters.projectName }}.Tests"
+    continueOnError: false
+    inputs:
+      command: build
+      arguments: --configuration ${{ parameters.buildConfiguration }} --no-restore /nologo
+      projects: tests/${{ parameters.projectName }}.Tests/${{ parameters.projectName }}.Tests.csproj
+
+  - task: DotNetCoreCLI@2
+    displayName: "dotnet run test ${{ parameters.projectName }}.Tests"
+    continueOnError: false
+    inputs:
+      command: test
+      arguments: --configuration ${{ parameters.buildConfiguration }} --no-restore --no-build --settings test.runsettings --collect:"XPlat Code Coverage" /nologo /p:CollectCoverage=true /p:CoverletOutputFormat=cobertura --blame-crash
+      projects: tests/${{ parameters.projectName }}.Tests/${{ parameters.projectName }}.Tests.csproj

@@ -1,0 +1,89 @@
+parameters:
+  # Conventional Commits regex used to validate the PR title.
+  # Default: <type>(<scope>)!: <subject>
+  pattern: '^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([^)\r\n]+\))?(!)?:\s+\S.*$'
+
+steps:
+  - task: PowerShell@2
+    displayName: Validate Conventional Commit PR title
+    env:
+      # NOTE: This template may need to call Azure DevOps REST API to fetch the PR title.
+      # That call requires an OAuth token.
+      # Azure DevOps setting to enable: "Allow scripts to access OAuth token" (System.AccessToken).
+      SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+    inputs:
+      targetType: inline
+      pwsh: true
+      script: |
+        # Conventional Commits: https://www.conventionalcommits.org/
+        # We validate the PR title (not commit message) during PR builds.
+        if ($env:BUILD_REASON -ne 'PullRequest') {
+          Write-Host "Build reason is '$($env:BUILD_REASON)'; skipping PR title validation."
+          exit 0
+        }
+
+        $title = $env:SYSTEM_PULLREQUEST_TITLE
+
+        # Some configurations don't populate SYSTEM_PULLREQUEST_TITLE; fall back to REST API.
+        if ([string]::IsNullOrWhiteSpace($title)) {
+          $prEnvNames = @(Get-ChildItem env:SYSTEM_PULLREQUEST_* -ErrorAction SilentlyContinue | ForEach-Object { $_.Name })
+          if ($prEnvNames.Count -gt 0) {
+            Write-Host "PR env vars present: $($prEnvNames -join ', ')"
+          } else {
+            Write-Host "No SYSTEM_PULLREQUEST_* env vars found."
+          }
+
+          $prId = $env:SYSTEM_PULLREQUEST_PULLREQUESTID
+          $repoId = $env:BUILD_REPOSITORY_ID
+          $collectionUri = $env:SYSTEM_COLLECTIONURI
+          $projectName = $env:SYSTEM_TEAMPROJECT
+          $projectId = $env:SYSTEM_TEAMPROJECTID
+          $token = $env:SYSTEM_ACCESSTOKEN
+
+          if ([string]::IsNullOrWhiteSpace($prId) -or [string]::IsNullOrWhiteSpace($repoId) -or [string]::IsNullOrWhiteSpace($collectionUri) -or ([string]::IsNullOrWhiteSpace($projectId) -and [string]::IsNullOrWhiteSpace($projectName))) {
+            Write-Host "##vso[task.logissue type=error]Unable to resolve PR context to fetch title via REST API."
+            Write-Host "##vso[task.logissue type=error]prId='$prId' repoId='$repoId' collectionUri='$collectionUri' projectId='$projectId' projectName='$projectName'"
+            exit 1
+          }
+
+          if ([string]::IsNullOrWhiteSpace($token)) {
+            # Without System.AccessToken, we cannot call the REST API to fetch PR metadata.
+            Write-Host "##vso[task.logissue type=error]SYSTEM_ACCESSTOKEN is empty. Enable 'Allow scripts to access OAuth token' for this pipeline/job to fetch PR title via REST API."
+            exit 1
+          }
+
+          # Prefer projectId to avoid URL encoding issues with project names (spaces/special chars).
+          $projectSegment = if (-not [string]::IsNullOrWhiteSpace($projectId)) { $projectId } else { [Uri]::EscapeDataString($projectName) }
+          $uri = "${collectionUri}${projectSegment}/_apis/git/repositories/${repoId}/pullRequests/${prId}?api-version=7.1"
+          try {
+            $headers = @{ Authorization = "Bearer $token" }
+            $pr = Invoke-RestMethod -Method Get -Uri $uri -Headers $headers -ErrorAction Stop
+            $title = $pr.title
+            Write-Host "Fetched PR title via REST API: '$title'"
+          } catch {
+            Write-Host "##vso[task.logissue type=error]Failed to fetch PR title via REST API: $($_.Exception.Message)"
+            Write-Host "##vso[task.logissue type=error]GET $uri"
+            exit 1
+          }
+        }
+
+        if ([string]::IsNullOrWhiteSpace($title)) {
+          Write-Host "##vso[task.logissue type=error]PR title is empty or missing (env var and REST API fallback both failed)."
+          exit 1
+        }
+
+        $title = $title.Trim()
+
+        # type(scope)!: subject
+        $pattern = '${{ parameters.pattern }}'
+
+        if ($title -match $pattern) {
+          Write-Host "PR title OK: '$title'"
+          exit 0
+        }
+
+        Write-Host "##vso[task.logissue type=error]PR title must follow Conventional Commits."
+        Write-Host "##vso[task.logissue type=error]Expected: <type>(<scope>)!: <subject>"
+        Write-Host "##vso[task.logissue type=error]Allowed types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert"
+        Write-Host "##vso[task.logissue type=error]Actual: '$title'"
+        exit 1

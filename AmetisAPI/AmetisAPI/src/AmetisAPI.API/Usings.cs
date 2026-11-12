@@ -1,0 +1,11 @@
+global using System.Diagnostics.CodeAnalysis;
+global using System.Net;
+global using System.Text.Json;
+global using System.Text.Json.Serialization;
+global using AmetisAPI.API.Extensions;
+global using AmetisAPI.API.Presenters;
+global using AmetisAPI.Core.Responses;
+global using AmetisAPI.Domain.Errors;
+global using Asp.Versioning;
+global using Cortex.Mediator;
+global using Microsoft.AspNetCore.Mvc;

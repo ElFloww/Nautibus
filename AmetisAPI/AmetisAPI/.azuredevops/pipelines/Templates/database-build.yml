@@ -1,0 +1,23 @@
+# Job template - Build Database Project
+parameters:
+  buildConfiguration: ""
+  solutionName: ""
+  dbArtifactName: ""
+  publishArtifact: false
+
+steps:
+  # Build database project
+  - task: MSBuild@1
+    displayName: Build Database Project
+    inputs:
+      solution: src/${{ parameters.solutionName }}.Database/${{ parameters.solutionName }}.Database.sqlproj
+      configuration: ${{ parameters.buildConfiguration }}
+
+  # Publish resulting dacpac file
+
+  - task: PublishBuildArtifacts@1
+    condition: and(succeeded(),${{ parameters.publishArtifact }})
+    inputs:
+      PathtoPublish: src/${{ parameters.solutionName }}.Database/bin/${{ parameters.buildConfiguration }}
+      ArtifactName: ${{ parameters.dbArtifactName }}
+      publishLocation: "Container"

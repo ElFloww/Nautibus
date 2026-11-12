@@ -1,0 +1,27 @@
+variables:
+  # Build environment variables
+  - name: poolName
+    value: ads_Windows
+    #list of available version https://github.com/SonarSource/sonar-scanner-msbuild/tags
+  - name: sonarDotnetScannerVersion
+    value: 10.1.2.114627
+  - name: solutionName
+    value: AmetisAPI
+  - name: appBuildArtifactName
+    value: app_build
+  - name: dbArtifactName
+    value: database_build
+  - name: appArtifactName
+    value: AmetisAPIPackage
+
+  # Project location and output
+  # .NET - Disable telemetry and skip first time experience
+  - name: dotnet_cli_telemetry_optout
+    value: true
+
+  - name: dotnet_skip_first_time_experience
+    value: true
+
+  # NuGet - Set package cache folder
+  - name: nuget_packages
+    value: $(Pipeline.Workspace)/.nuget/packages

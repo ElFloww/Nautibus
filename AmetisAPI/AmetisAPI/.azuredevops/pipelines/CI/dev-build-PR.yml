@@ -1,0 +1,120 @@
+# Variable 'EnableSonarQube' was defined in the Variables tab : boolean to define if we need to execute SonarQube analysis
+# Variable 'scProjectKey' was defined in the Variables tab : Project key in SonarQube
+# Variable 'scServiceConnection' was defined in the Variables tab : name of the Service connection set in Azure DevOps for the SonarQube service.
+
+#trigger on develop's PR
+trigger: none
+
+variables:
+  # Build environment variables
+  - name: buildConfiguration
+    value: Debug
+  # Import shared variables
+  - template: ../Templates/variables.yml
+
+# Build number format
+name: $(Build.DefinitionName)_$(SourceBranchName)-$(Date:yyyy-MM-dd)-build$(Rev:.rrr)
+
+pool:
+  name: "$(poolName)"
+  demands:
+    - VisualStudio
+    - DotNetCore_10.
+
+stages:
+  - stage: ValidatePRTitle
+    displayName: Validate PR title
+    jobs:
+      - job: validate_pr_title
+        displayName: Validate PR title (Conventional Commits)
+        steps:
+          - checkout: none
+          - template: ../Templates/validate-pr-title.yml
+  
+  - stage: Build
+    dependsOn: ValidatePRTitle
+    condition: and(succeeded('ValidatePRTitle'), ne(variables['EnableSonarQube'], 'true'))
+    jobs:
+      # Build App Project
+      - job:
+        displayName: Build Applications dotnet
+        steps:
+          - checkout: "self"
+          # build compiled project
+          - template: ../Templates/app-build.yml
+            parameters:
+              buildConfiguration: $(buildConfiguration)
+              solutionName: $(solutionName)
+              appBuildArtifactName: $(appBuildArtifactName)
+              publishArtifact: true
+      # Build Database Project
+      - job:
+        displayName: Build Database
+        steps:
+          - checkout: "self"
+          # build database
+          - template: ../Templates/database-build.yml
+            parameters:
+              buildConfiguration: $(buildConfiguration)
+              solutionName: $(solutionName)
+              dbArtifactName: $(dbArtifactName)
+              publishArtifact: true
+  # Run of unit tests
+  - stage: Tests
+    condition: and(succeeded(), ne(variables['EnableSonarQube'], 'true'))
+    dependsOn: Build
+    jobs:
+      # Tests Api
+      - job: app_tests
+        displayName: Tests Application Project and libraries
+        steps:
+          - checkout: none
+          - template: ../Templates/app-test.yml
+            parameters:
+              buildConfiguration: $(buildConfiguration)
+              appBuildArtifactName: $(appBuildArtifactName)
+              dbArtifactName: $(dbArtifactName)
+              solutionName: $(solutionName)
+              downloadSources: true
+              publishTestResult: true
+
+  #Run Sonar Analysis
+  - stage: Analysis
+    dependsOn: ValidatePRTitle
+    condition: and(succeeded('ValidatePRTitle'), eq(variables['EnableSonarQube'], 'true'))
+    jobs:
+      - job: codeanalysis
+        continueOnError: false
+        displayName: Analysis for security and code quality
+        steps:
+          - checkout: "self"
+          - template: ../Templates/analyzeSonar.yml
+            parameters:
+              scServiceConnection: $(scServiceConnection)
+              scProjectKey: $(scProjectKey)
+              sonarDotnetScannerVersion: $(sonarDotnetScannerVersion)
+              buildConfiguration: $(buildConfiguration)
+              solutionName: $(solutionName)
+              appBuildArtifactName: $(appBuildArtifactName)
+              dbArtifactName: $(dbArtifactName)
+              publishArtifact: true
+              publishTestResult: true
+
+  #Publish test reports
+  - stage: PublishTestsReports
+    condition: |
+      and(
+       succeeded('ValidatePRTitle'),
+       in(dependencies.Build.result, 'Succeeded', 'Skipped'),
+       in(dependencies.Tests.result, 'Succeeded', 'Skipped'),
+       in(dependencies.Analysis.result, 'Succeeded', 'Skipped'))
+    dependsOn:
+      - Build
+      - Tests
+      - Analysis
+    jobs:
+      - job: publishTestsReports
+        displayName: Publish Tests Reports
+        steps:
+          - checkout: none
+          - template: ../Templates/mergeAndPublishTests.yml

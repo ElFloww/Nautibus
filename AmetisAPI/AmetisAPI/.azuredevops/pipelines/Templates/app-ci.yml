@@ -1,0 +1,54 @@
+# Job template - Publish App
+parameters:
+  buildConfiguration: ''
+  solutionName: ''
+  appBuildArtifactName: ''
+  appArtifactName: ''
+
+steps:
+  - checkout: none
+  # Get compiled project
+  - task: DownloadBuildArtifacts@0
+    displayName: Download zip sources
+    inputs:
+      buildType: 'current'
+      downloadType: 'single'
+      artifactName: ${{ parameters.appBuildArtifactName }}
+      downloadPath: $(Agent.TempDirectory)
+  - task: ExtractFiles@1
+    displayName: Extract sources
+    inputs:
+      archiveFilePatterns: $(Agent.TempDirectory)/${{ parameters.appBuildArtifactName }}/${{ parameters.appBuildArtifactName }}.zip
+      destinationFolder: $(Agent.BuildDirectory)
+      cleanDestinationFolder: false
+      overwriteExistingFiles: true
+  # Init in Powershell
+  - template: initialization.yml
+  # Restore .NET packages
+  - task: DotNetCoreCLI@2
+    displayName: restore Nuget
+    inputs:
+      command: restore
+      arguments: --interactive --force-evaluate --locked-mode /nologo
+      projects: $(Build.SourcesDirectory)/src/${{ parameters.solutionName }}.API/${{ parameters.solutionName }}.API.csproj
+  # Publish compiled project
+  - task: DotNetCoreCLI@2
+    displayName: dotnet publish
+    inputs:
+      command: publish
+      arguments: '--configuration ${{ parameters.buildConfiguration }} --no-restore --output $(Build.ArtifactStagingDirectory) -p:DebugType=None -p:DebugSymbols=false'
+      projects: $(Build.SourcesDirectory)/src/${{ parameters.solutionName }}.API/${{ parameters.solutionName }}.API.csproj
+      publishWebProjects: false
+  - task: CopyFiles@2
+    displayName: Copy deployment scripts
+    inputs:
+      contents: .azuredevops/pipelines/Scripts/**/*.ps1
+      targetFolder: $(Build.ArtifactStagingDirectory)
+      flattenFolders: true
+  # Publish resulting pipeline artifact
+  - task: PublishBuildArtifacts@1
+    displayName: 'Publish artifact: ${{ parameters.appArtifactName }}'
+    inputs:
+      ArtifactName: ${{ parameters.appArtifactName }}
+      PathtoPublish: $(Build.ArtifactStagingDirectory)
+      publishLocation: 'Container'

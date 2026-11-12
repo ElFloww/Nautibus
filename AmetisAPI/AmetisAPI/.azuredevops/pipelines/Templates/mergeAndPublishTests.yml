@@ -1,0 +1,35 @@
+steps:
+  - task: DotNetCoreCLI@2
+    displayName: "Install ReportGenerator tool"
+    inputs:
+      command: custom
+      custom: tool
+      arguments: "update --global --ignore-failed-sources dotnet-reportgenerator-globaltool"
+
+  #download coverage files
+  - task: DownloadBuildArtifacts@0
+    displayName: Download coverage files
+    inputs:
+      buildType: "current"
+      downloadType: "single"
+      artifactName: tests
+      downloadPath: $(Agent.TempDirectory)
+
+  - task: PowerShell@2
+    displayName: "Merge code coverage reports"
+    inputs:
+      targetType: inline
+      script: |
+        Write-Host '##vso[task.setVariable variable=disable.coverage.autogenerate;isSecret=false]true'
+
+        $source = '$(Agent.TempDirectory)/**/coverage.cobertura.xml'
+        $target = '$(Agent.TempDirectory)/Merged/'
+
+        & reportgenerator -reports:$source -targetdir:$target -reporttypes:"HtmlInline_AzurePipelines;Cobertura"
+
+  - task: PublishCodeCoverageResults@2
+    displayName: "Publish code coverage"
+    condition: always()
+    inputs:
+      codeCoverageTool: Cobertura
+      summaryFileLocation: "$(Agent.TempDirectory)/Merged/**/*.xml"

@@ -1,0 +1,11 @@
+﻿<Solution>
+  <Project Path="src/AmetisAPI.API/AmetisAPI.API.csproj" />
+  <Project Path="src/AmetisAPI.Core/AmetisAPI.Core.csproj" />
+  <Project Path="src/AmetisAPI.Domain/AmetisAPI.Domain.csproj" />
+  <Project Path="src/AmetisAPI.Infrastructure/AmetisAPI.Infrastructure.csproj" />
+  <Project Path="src/AmetisAPI.Worker/AmetisAPI.Worker.csproj" />
+  <Project Path="tests/AmetisAPI.API.Tests/AmetisAPI.API.Tests.csproj" />
+  <Project Path="tests/AmetisAPI.Core.Tests/AmetisAPI.Core.Tests.csproj" />
+  <Project Path="tests/AmetisAPI.Domain.Tests/AmetisAPI.Domain.Tests.csproj" />
+  <Project Path="tests/AmetisAPI.Infrastructure.Tests/AmetisAPI.Infrastructure.Tests.csproj" />
+</Solution>

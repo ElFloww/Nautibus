@@ -1,0 +1,10 @@
+global using System.Net;
+global using Autofac;
+global using Autofac.Core;
+global using Mapster;
+global using MapsterMapper;
+global using Microsoft.Extensions.Configuration;
+global using Moq;
+global using Moq.Protected;
+global using NFluent;
+global using Xunit;

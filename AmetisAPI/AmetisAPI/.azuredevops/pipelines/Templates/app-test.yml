@@ -1,0 +1,101 @@
+# Job template - Build Web Project
+parameters:
+  buildConfiguration: ""
+  appBuildArtifactName: ""
+  dbArtifactName: ""
+  solutionName: ""
+  downloadSources: false
+  publishTestResult: false
+
+steps:
+
+  #download sources if needed
+  - task: DownloadBuildArtifacts@0
+    condition: ${{ parameters.downloadSources }}
+    displayName: Download zip sources
+    inputs:
+      buildType: "current"
+      downloadType: "single"
+      artifactName: ${{ parameters.appBuildArtifactName }}
+      downloadPath: $(Agent.TempDirectory)
+  - task: ExtractFiles@1
+    condition: and(succeeded(), ${{ parameters.downloadSources }})
+    displayName: Extract sources
+    inputs:
+      archiveFilePatterns: $(Agent.TempDirectory)/${{ parameters.appBuildArtifactName }}/${{ parameters.appBuildArtifactName }}.zip
+      destinationFolder: $(Agent.BuildDirectory)
+      cleanDestinationFolder: false
+      overwriteExistingFiles: true
+
+  # Init in Powershell just after download sources because otherwise it could result in the missing of global.json file
+  - template: initialization.yml
+
+
+
+  - task: PowerShell@2
+    displayName: "start mssqllocaldb"
+    inputs:
+      targetType: "inline"
+      script: "sqllocaldb start mssqllocaldb"
+
+  - task: DownloadBuildArtifacts@1
+    condition: ${{ parameters.downloadSources }}
+    displayName: Download DacPac
+    inputs:
+      source: current
+      artifactName: ${{ parameters.dbArtifactName }}
+      downloadPath: $(Build.SourcesDirectory)/src/${{ parameters.solutionName }}.Database/bin/${{ parameters.buildConfiguration }}
+      downloadType: "single"
+
+  - task: PowerShell@2
+    displayName: Set DacPac Path
+    inputs:
+      targetType: "inline"
+      pwsh: true
+      script: |
+        Write-Host "$(Build.SourcesDirectory)/src/${{ parameters.solutionName }}.Database/bin/${{ parameters.buildConfiguration }}/${{ parameters.dbArtifactName }}/${{ parameters.solutionName }}.Database.dacpac"
+        Write-Host "DACPACPATH = $(Build.SourcesDirectory)/src/${{ parameters.solutionName }}.Database/bin/${{ parameters.buildConfiguration }}/${{ parameters.dbArtifactName }}/${{ parameters.solutionName }}.Database.dacpac"
+        Write-Host "##vso[task.setvariable variable=DACPACPATH;]$(Build.SourcesDirectory)/src/${{ parameters.solutionName }}.Database/bin/${{ parameters.buildConfiguration }}/${{ parameters.dbArtifactName }}/${{ parameters.solutionName }}.Database.dacpac"
+  
+  
+
+  - template: test-build-run.yml
+    parameters:
+      downloadSources: ${{ parameters.downloadSources }}
+      buildConfiguration: ${{ parameters.buildConfiguration }}
+      projectName: ${{ parameters.solutionName }}.Core
+
+  - template: test-build-run.yml
+    parameters:
+      downloadSources: ${{ parameters.downloadSources }}
+      buildConfiguration: ${{ parameters.buildConfiguration }}
+      projectName: ${{ parameters.solutionName }}.Domain
+
+  - template: test-build-run.yml
+    parameters:
+      downloadSources: ${{ parameters.downloadSources }}
+      buildConfiguration: ${{ parameters.buildConfiguration }}
+      projectName: ${{ parameters.solutionName }}.Infrastructure
+
+  - template: test-build-run.yml
+    parameters:
+      downloadSources: ${{ parameters.downloadSources }}
+      buildConfiguration: ${{ parameters.buildConfiguration }}
+      projectName: ${{ parameters.solutionName }}.API
+
+  - task: CopyFiles@2
+    displayName: "Copy coverage files"
+    inputs:
+      SourceFolder: "$(Agent.TempDirectory)"
+      Contents: |
+        **/*.coverage
+        **/coverage.cobertura.xml
+      targetFolder: "$(Build.ArtifactStagingDirectory)" #set coverage files in this folder to enable coverage result in devops
+
+  - task: PublishBuildArtifacts@1
+    displayName: "Publish coverage files"
+    inputs:
+      PathtoPublish: $(Build.ArtifactStagingDirectory)
+      ArtifactName: "tests"
+      publishLocation: "Container"
+

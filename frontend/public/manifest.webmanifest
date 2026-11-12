@@ -1,0 +1,11 @@
+{
+  "name": "Nautibus — le tour d’Amiens en temps réel",
+  "short_name": "Nautibus",
+  "description": "Horaires, bus en direct, retards et infos trafic du réseau de bus d’Amiens Métropole.",
+  "lang": "fr",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#00594f",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

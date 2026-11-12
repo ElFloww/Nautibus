@@ -1,0 +1,17 @@
+global using System.Text.Json;
+global using AmetisAPI.API.Controllers;
+global using AmetisAPI.API.Presenters;
+global using AmetisAPI.Core.Responses;
+global using AmetisAPI.Domain.Bo;
+global using Autofac;
+global using Autofac.Core;
+global using Cortex.Mediator;
+global using Cortex.Mediator.Queries;
+global using Mapster;
+global using Microsoft.AspNetCore.Http;
+global using Microsoft.AspNetCore.Mvc;
+global using Microsoft.Extensions.Logging;
+global using Microsoft.Extensions.Primitives;
+global using Moq;
+global using NFluent;
+global using Xunit;

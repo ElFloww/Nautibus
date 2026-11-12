@@ -1,0 +1,10 @@
+global using System;
+global using AmetisAPI.Core.Responses;
+global using AmetisAPI.Domain.Bo;
+global using AmetisAPI.Domain.Interfaces;
+global using Autofac;
+global using Cortex.Mediator;
+global using Microsoft.Extensions.Logging;
+global using Moq;
+global using NFluent;
+global using Xunit;

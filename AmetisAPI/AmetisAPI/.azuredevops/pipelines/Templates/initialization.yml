@@ -1,0 +1,25 @@
+parameters:
+    downloadSources: true
+
+steps:
+    - task: PowerShell@2
+      condition: and(succeeded(), ${{ parameters.downloadSources }} )
+      displayName: Prepare cache
+      inputs:
+        targetType: 'inline'
+        pwsh: true
+        script: |
+          Write-Host "##vso[task.setvariable variable=NUGET_PACKAGES;]$(nuget_packages)"
+          Write-Host "##vso[task.setvariable variable=DOTNET_CLI_TELEMETRY_OPTOUT;]1" 
+          Write-Host "##vso[task.setvariable variable=DOTNET_TieredCompilation;]1" 
+          Write-Host "##vso[task.setvariable variable=COMPlus_TieredCompilation;]1" 
+
+          $branch = $Env:BUILD_SOURCEBRANCHNAME;
+          Write-Host $branch
+    # Download .NET Core SDK based on the global.json config
+    - task: UseDotNet@2
+      condition: and(succeeded(), ${{ parameters.downloadSources }} ) 
+      displayName: Download .NET SDK
+      inputs:
+        useGlobalJson: true
+        installationPath: $(Agent.ToolsDirectory)/dotnet

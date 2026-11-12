@@ -1,0 +1,165 @@
+# Nautibus — déploiement complet (LXC Proxmox ou tout hôte Docker x86_64).
+# Prérequis : fichier .env et deploy/Caddyfile (générés par ./deploy.sh install). Ensuite « docker compose up -d --build » suffit :
+# le schéma de la base et le compte SQL applicatif sont mis à jour à chaque démarrage (db-init, db-user).
+#
+#   Internet ─► caddy (80/443, HTTPS) ─┬─► web  (nginx, fichiers du site)
+#                                       └─► api  (/api, /hubs, /health) ─► sqlserver, redis
+#                                 worker (imports GTFS, collecte temps réel, notifications) ─► sqlserver, redis
+#
+# Seul Caddy publie des ports ; les autres services ne sont joignables que sur le réseau Docker interne.
+
+x-dotnet-env: &dotnet-env
+  ConnectionStrings__Database: "Server=sqlserver;Database=${DB_NAME};User Id=${DB_APP_USER};Password=${DB_APP_PASSWORD};TrustServerCertificate=True;Encrypt=True"
+  ConnectionStrings__Redis: "redis:6379,abortConnect=false"
+  Push__PublicKey: ${PUSH_PUBLIC_KEY:-}
+  Push__PrivateKey: ${PUSH_PRIVATE_KEY:-}
+  Push__Subject: ${PUSH_SUBJECT:-}
+  TZ: Europe/Paris
+  # Journaux : fichier dans le volume « logs » et console (docker compose logs).
+  Serilog__Using__1: Serilog.Sinks.Console
+  Serilog__WriteTo__1__Name: Console
+
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      # Édition Express : gratuite en production (base limitée à 10 Go, largement suffisant ici).
+      MSSQL_PID: Express
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?à définir dans .env}
+      TZ: Europe/Paris
+    volumes:
+      - sqldata:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -Q 'SELECT 1' -b -o /dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    # État temps réel uniquement (reconstruit à chaque collecte) : pas de persistance disque.
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # Mise à jour du schéma (DACPAC, sans perte de données) à chaque démarrage, puis arrêt.
+  db-init:
+    image: mcr.microsoft.com/dotnet/sdk:10.0
+    environment:
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      # sqlpackage peut cibler une version de .NET antérieure à celle de l'image.
+      DOTNET_ROLL_FORWARD: Major
+    volumes:
+      - ./deploy/schema:/schema:ro
+      - sqlpackage:/root/.dotnet/tools
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >
+        (test -x /root/.dotnet/tools/sqlpackage || dotnet tool install --tool-path /root/.dotnet/tools microsoft.sqlpackage) &&
+        /root/.dotnet/tools/sqlpackage /Action:Publish /SourceFile:/schema/AmetisAPI.Database.dacpac
+        "/TargetConnectionString:Server=sqlserver;Database=$$DB_NAME;User Id=sa;Password=$$MSSQL_SA_PASSWORD;TrustServerCertificate=True"
+        /p:BlockOnPossibleDataLoss=true /p:AllowIncompatiblePlatform=true /p:DropObjectsNotInSource=false
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+
+  # Compte SQL de l'application : lecture/écriture des données seulement, aucun droit sur le schéma.
+  db-user:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      DB_APP_USER: ${DB_APP_USER}
+      DB_APP_PASSWORD: ${DB_APP_PASSWORD}
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - >
+        /opt/mssql-tools18/bin/sqlcmd -C -b -S sqlserver -U sa -P "$$MSSQL_SA_PASSWORD" -Q "
+        IF SUSER_ID(N'$$DB_APP_USER') IS NULL CREATE LOGIN [$$DB_APP_USER] WITH PASSWORD = N'$$DB_APP_PASSWORD', CHECK_POLICY = ON;
+        ELSE ALTER LOGIN [$$DB_APP_USER] WITH PASSWORD = N'$$DB_APP_PASSWORD';
+        USE [$$DB_NAME];
+        IF USER_ID(N'$$DB_APP_USER') IS NULL CREATE USER [$$DB_APP_USER] FOR LOGIN [$$DB_APP_USER];
+        ALTER ROLE db_datareader ADD MEMBER [$$DB_APP_USER];
+        ALTER ROLE db_datawriter ADD MEMBER [$$DB_APP_USER];"
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+
+  api:
+    build:
+      context: AmetisAPI/AmetisAPI
+      dockerfile: src/AmetisAPI.API/Dockerfile
+    environment:
+      <<: *dotnet-env
+      ASPNETCORE_ENVIRONMENT: Production
+      ReverseProxy__Enabled: "true"
+      Realtime__CollectInProcess: "false"
+      Serilog__WriteTo__0__Args__path: /app/logs/api-.log
+      Smtp__Host: ${SMTP_HOST:-}
+      Smtp__Port: ${SMTP_PORT:-587}
+      Smtp__EnableSsl: ${SMTP_SSL:-true}
+      Smtp__UserName: ${SMTP_USER:-}
+      Smtp__Password: ${SMTP_PASSWORD:-}
+      Smtp__FromAddress: ${SMTP_FROM:-}
+      Smtp__PublicUrl: ${PUBLIC_URL}
+      DataProtection__KeysPath: /app/keys
+    volumes:
+      - logs:/app/logs
+      - dpkeys:/app/keys
+    depends_on:
+      db-user:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: AmetisAPI/AmetisAPI
+      dockerfile: src/AmetisAPI.Worker/Dockerfile
+    environment:
+      <<: *dotnet-env
+      DOTNET_ENVIRONMENT: Production
+      Serilog__WriteTo__0__Args__path: /app/logs/worker-.log
+    volumes:
+      - logs:/app/logs
+    depends_on:
+      db-user:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build:
+      context: frontend
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [api, web]
+    restart: unless-stopped
+
+volumes:
+  sqldata:
+  logs:
+  dpkeys:
+  sqlpackage:
+  caddy_data:
+  caddy_config:
