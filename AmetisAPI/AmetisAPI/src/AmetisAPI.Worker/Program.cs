@@ -6,6 +6,7 @@ using AmetisAPI.Infrastructure.Data.EntityFramework;
 using Autofac;
 using Autofac.Extensions.DependencyInjection;
 using Cortex.Mediator.DependencyInjection;
+using Mapster;
 using Serilog;
 
 namespace AmetisAPI.Worker
@@ -32,6 +33,14 @@ namespace AmetisAPI.Worker
             if (!v_Builder.Services.AddAmetisInfrastructure(v_Builder.Configuration, v_ConnectionString))
                 throw new ConfigurationErrorsException("ConnectionStrings:Redis est obligatoire pour le Worker : sans Redis, l'API ne verrait pas le temps réel collecté");
 
+            // Mapster : requis par l'unité de travail (UnitOfWork) utilisée par les cas d'usage, comme dans l'API.
+            v_Builder.Services.AddMapster();
+            v_Builder.Services.AddSingleton(_ =>
+            {
+                TypeAdapterConfig v_Config = TypeAdapterConfig.GlobalSettings;
+                v_Config.Scan(typeof(InfrastructureModule).Assembly);
+                return v_Config;
+            });
             v_Builder.Services.AddCortexMediator([typeof(CoreModule)], p_Options => { p_Options.AddDefaultBehaviors(); p_Options.OnlyPublicClasses = false; });
             v_Builder.Services.AddHostedService<GtfsImportService>();
             v_Builder.Services.AddHostedService<RealtimeCollectorService>();

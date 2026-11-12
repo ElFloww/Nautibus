@@ -9,7 +9,7 @@ namespace AmetisAPI.Core.Hosting
     {
         protected override TimeSpan Interval => TimeSpan.FromDays(1);
 
-        protected override Task RunOnceAsync(IMediator p_Mediator, CancellationToken p_CancellationToken)
+        protected internal override Task RunOnceAsync(IMediator p_Mediator, CancellationToken p_CancellationToken)
         {
             return p_Mediator.SendQueryAsync<PurgeVehicleHistoryRequest, ValueResponse<int>>(new PurgeVehicleHistoryRequest(), p_CancellationToken);
         }

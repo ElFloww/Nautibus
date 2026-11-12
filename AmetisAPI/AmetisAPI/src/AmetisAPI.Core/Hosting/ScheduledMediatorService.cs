@@ -13,11 +13,26 @@ namespace AmetisAPI.Core.Hosting
 
         protected abstract TimeSpan Interval { get; }
 
-        protected abstract Task RunOnceAsync(IMediator p_Mediator, CancellationToken p_CancellationToken);
+        /// <summary>Délai avant la prochaine exécution ; par défaut l'intervalle régulier.</summary>
+        protected internal virtual TimeSpan NextDelay => Interval;
+
+        protected internal abstract Task RunOnceAsync(IMediator p_Mediator, CancellationToken p_CancellationToken);
+
+        private static async Task<bool> DelayAsync(TimeSpan p_Delay, CancellationToken p_StoppingToken)
+        {
+            try
+            {
+                await Task.Delay(p_Delay, p_StoppingToken);
+                return true;
+            }
+            catch (OperationCanceledException)
+            {
+                return false;
+            }
+        }
 
         protected override async Task ExecuteAsync(CancellationToken p_StoppingToken)
         {
-            using PeriodicTimer v_Timer = new(Interval);
             do
             {
                 try
@@ -30,7 +45,7 @@ namespace AmetisAPI.Core.Hosting
                     m_Logger.LogError(v_Ex, "Tâche planifiée {Service} en échec", GetType().Name);
                 }
             }
-            while (await v_Timer.WaitForNextTickAsync(p_StoppingToken));
+            while (await DelayAsync(NextDelay, p_StoppingToken));
         }
     }
 }

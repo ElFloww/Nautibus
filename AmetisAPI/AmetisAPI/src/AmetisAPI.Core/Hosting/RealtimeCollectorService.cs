@@ -10,7 +10,7 @@ namespace AmetisAPI.Core.Hosting
     {
         protected override TimeSpan Interval => TimeSpan.FromSeconds(30);
 
-        protected override async Task RunOnceAsync(IMediator p_Mediator, CancellationToken p_CancellationToken)
+        protected internal override async Task RunOnceAsync(IMediator p_Mediator, CancellationToken p_CancellationToken)
         {
             ValueResponse<RealtimeStatus> v_Result = await p_Mediator.SendQueryAsync<CollectRealtimeRequest, ValueResponse<RealtimeStatus>>(new CollectRealtimeRequest(), p_CancellationToken);
             if (!v_Result.Success)
