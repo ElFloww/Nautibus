@@ -176,3 +176,27 @@ Non vérifié (Docker absent du poste) :
 - Existence de l'image `mcr.microsoft.com/dotnet/sdk:10.0.201`, fonctionnement de sqlpackage en outil dotnet dans le conteneur, présence de tzdata dans l'image aspnet.
 - HTTPS : Let's Encrypt exige un domaine pointant sur le serveur et les ports 80/443 joignables ; sur IP locale, certificat interne de Caddy (avertissement du navigateur ; les cookies de connexion exigent HTTPS).
 - Sauvegardes non planifiées, restauration non testée.
+
+## 2026-11-12 — Premier déploiement Docker réel (poste local) et corrections
+
+Demande : générer le `.env` local avec des valeurs aléatoires pour l'URL nautibus.florent-dubut.fr (le `docker compose up` du propriétaire échouait faute de `.env`).
+
+Fait :
+- `.env` généré (mots de passe SA et applicatif aléatoires, clés VAPID générées par l'API, SMTP vide) et `deploy/Caddyfile` (domaine nautibus.florent-dubut.fr + https://localhost en certificat interne pour l'essai local). Contact VAPID = URL du site (aucune adresse e-mail transmise aux services push). Secrets non reproduits ici.
+- `docker-compose.yml` rendu autonome : `db-init` (schéma) n'est plus dans un profil et un service `db-user` crée/met à jour le compte SQL applicatif ; api et worker attendent leur réussite. `docker compose up -d --build` suffit. `deploy.sh` adapté. Le bloc réutilisable du Caddyfile est désormais écrit avant les sites qui l'importent.
+- Ajouts du propriétaire constatés et conservés : persistance des clés de protection des données (`DataProtection:KeysPath`, volume `dpkeys`).
+
+Défauts trouvés au premier démarrage réel et corrigés :
+- Worker : Mapster non enregistré (l'API le faisait) → aucun cas d'usage instanciable, imports et collecte jamais exécutés. Enregistrement ajouté comme dans l'API.
+- Un import GTFS en échec (coupure réseau constatée sur le GTFS temps réel) n'était retenté que 6 h plus tard : nouvel essai après 10 min (`ScheduledMediatorService.NextDelay`, `GtfsImportService`), test `Failed_Import_Is_Retried_After_Ten_Minutes_Then_Back_To_Six_Hours`.
+- Construction : sous Docker Desktop sur ce poste, les constructions parallèles saturent le relais DNS (NU1301 sur api.nuget.org, `npm ci` bloqué) ; construites une par une, elles passent. Particularité du poste, non corrigée dans les fichiers.
+
+Vérifié (Docker Desktop local, 2026-11-12) :
+- Construction des 3 images ; `docker compose up -d` : sqlserver et redis sains, schéma publié par sqlpackage (« Successfully published database »), compte applicatif créé, tous les services démarrés.
+- Worker : réseau importé (42 lignes, 1 452 arrêts, 0 rejet), GTFS temps réel importé à la nouvelle tentative, santé « Healthy ».
+- À travers Caddy en HTTPS (https://localhost) : site 200 ; 102 bus dont 96 rattachés à une ligne et 86 avec retard ; tableau Gare du Nord 25 passages dont 15 en temps réel ; inscription, connexion (cookie Secure), compte, suppression ; clé push 200 ; limitation des connexions déclenchée (429) sur l'adresse réelle du client.
+- `dotnet test AmetisAPI.slnx` : API 2/2, Core 76/76, Infrastructure 58 + 5 ignorés (préexistants). 0 échec.
+
+Non vérifié :
+- Certificat Let's Encrypt : nautibus.florent-dubut.fr n'existe pas encore dans le DNS (NXDOMAIN). Il faut un enregistrement A vers l'IP publique et les ports 80/443 redirigés vers le LXC.
+- Déploiement sur le LXC Proxmox lui-même (`deploy.sh` non exécuté sur Linux).

@@ -66,7 +66,7 @@
 - [x] Définir la structure Clean Architecture.
 - [ ] Configurer les environnements Development, Preproduction et Production.
 - [ ] Définir la stratégie de branches et de déploiement.
-- [ ] Ajouter les fichiers de configuration Docker. *(docker-compose.yml + deploy.sh écrits pour un LXC Proxmox ; non exécutés : Docker absent du poste de développement)*
+- [x] Ajouter les fichiers de configuration Docker. *(docker-compose.yml + deploy.sh ; pile complète démarrée et testée sous Docker Desktop le 2026-11-12 ; pas encore sur le LXC)*
 
 ### P1.2 — Infrastructure
 
@@ -76,7 +76,7 @@
 - [ ] Déployer Redis.
 - [ ] Configurer les volumes persistants.
 - [ ] Configurer les sauvegardes. *(« ./deploy.sh backup » manuel ; planification et restauration non faites)*
-- [ ] Configurer le reverse proxy. *(Caddy configuré par deploy.sh, non exécuté)*
+- [x] Configurer le reverse proxy. *(Caddy, testé en local)*
 - [ ] Mettre en place HTTPS. *(Caddy : Let's Encrypt avec un domaine, autorité interne sur IP locale ; non exécuté)*
 - [ ] Préparer les secrets et variables d'environnement.
 
