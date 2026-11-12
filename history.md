@@ -200,3 +200,24 @@ Vérifié (Docker Desktop local, 2026-11-12) :
 Non vérifié :
 - Certificat Let's Encrypt : nautibus.florent-dubut.fr n'existe pas encore dans le DNS (NXDOMAIN). Il faut un enregistrement A vers l'IP publique et les ports 80/443 redirigés vers le LXC.
 - Déploiement sur le LXC Proxmox lui-même (`deploy.sh` non exécuté sur Linux).
+
+## 2026-11-12 — HTTPS confié à Nginx Proxy Manager (suppression de Caddy)
+
+Demande : le serveur dispose d'un Nginx Proxy Manager (NPM) qui gère HTTPS. Décision du propriétaire : HTTPS et certificats par NPM, plus de proxy HTTPS dans la pile.
+
+Fait :
+- `docker-compose.yml` : service `caddy` et volumes `caddy_data`/`caddy_config` supprimés. Le service `web` publie seul un port HTTP (`${HTTP_BIND:-0.0.0.0}:${HTTP_PORT:-8080}:80`), cible du proxy host NPM.
+- `frontend/nginx.conf` : nginx du service web devient le point d'entrée unique (fichiers du site, relais de `/api`, `/hubs` en WebSocket, `/health` vers `api:8080`, gzip). Les en-têtes `X-Forwarded-For`/`X-Forwarded-Proto` reçus de NPM sont transmis tels quels (repli sur l'adresse de connexion s'ils sont absents) : avec la limite par défaut d'un saut, l'API retient l'adresse du client vue par NPM. Sans cela, la limitation des connexions aurait vu NPM comme seul client. En-têtes de sécurité (nosniff, Referrer-Policy) dans `frontend/nautibus-headers.conf`, inclus dans chaque bloc (les `add_header` d'un bloc remplacent ceux du serveur). `frontend/Dockerfile` copie ce fichier.
+- `deploy.sh` : génération du Caddyfile supprimée ; `install` demande le domaine (obligatoire), le port HTTP (8080 par défaut) et un e-mail push facultatif (sinon l'URL du site sert de contact VAPID) ; `upgrade_env` ajoute `HTTP_PORT`/`HTTP_BIND` aux `.env` existants ; santé vérifiée à travers nginx du service web ; instructions NPM en tête du script et en fin d'installation.
+- `deploy/Caddyfile` supprimé, entrée retirée de `.gitignore`. Commentaire de `Program.cs` mis à jour (aucun changement de code).
+
+Réglage NPM attendu : proxy host `nautibus.florent-dubut.fr` → `http://<IP du LXC>:8080`, « Websockets Support » activé, certificat Let's Encrypt, « Force SSL », « HSTS Enabled ».
+
+Vérifié (Docker sous WSL, NPM simulé par curl avec X-Forwarded-For/Proto) :
+- `docker compose config --quiet` OK ; `nginx -t` OK (nginx:1.27-alpine) ; `bash -n deploy.sh` OK.
+- Pile construite et démarrée : site 200 avec en-têtes de sécurité, route SPA 200, `/health` Healthy, négociation SignalR puis WebSocket 101, connexion : 10 essais puis 429 pour l'adresse A, l'adresse B reste autorisée (401) → adresse réelle du client bien vue par l'API. Pile arrêtée ensuite (`docker compose down`, volumes conservés).
+
+Non vérifié / limites :
+- NPM réel et certificat non testés.
+- L'API se fie aux en-têtes X-Forwarded-* reçus sur le port publié : un accès direct à ce port (sans NPM) peut les falsifier. Restreindre `HTTP_BIND` ou le pare-feu à NPM si possible.
+- Préexistant, non corrigé : `UseHsts()` est appelé avant `UseForwardedHeaders()`, l'API n'émet donc pas HSTS derrière un proxy ; sans effet si « HSTS Enabled » est coché dans NPM.

@@ -76,8 +76,8 @@
 - [ ] Déployer Redis.
 - [ ] Configurer les volumes persistants.
 - [ ] Configurer les sauvegardes. *(« ./deploy.sh backup » manuel ; planification et restauration non faites)*
-- [x] Configurer le reverse proxy. *(Caddy, testé en local)*
-- [ ] Mettre en place HTTPS. *(Caddy : Let's Encrypt avec un domaine, autorité interne sur IP locale ; non exécuté)*
+- [x] Configurer le reverse proxy. *(Nginx Proxy Manager du propriétaire → nginx du service web (port HTTP_PORT, 8080 par défaut) → API ; chaîne testée en local en simulant NPM)*
+- [ ] Mettre en place HTTPS. *(assuré par Nginx Proxy Manager : proxy host, Let's Encrypt, websockets ; non exécuté)*
 - [ ] Préparer les secrets et variables d'environnement.
 
 ### P1.3 — Fondations backend
