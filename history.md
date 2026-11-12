@@ -221,3 +221,23 @@ Non vérifié / limites :
 - NPM réel et certificat non testés.
 - L'API se fie aux en-têtes X-Forwarded-* reçus sur le port publié : un accès direct à ce port (sans NPM) peut les falsifier. Restreindre `HTTP_BIND` ou le pare-feu à NPM si possible.
 - Préexistant, non corrigé : `UseHsts()` est appelé avant `UseForwardedHeaders()`, l'API n'émet donc pas HSTS derrière un proxy ; sans effet si « HSTS Enabled » est coché dans NPM.
+
+## 2026-11-12 — Carte de production invisible : type MIME du worker MapLibre
+
+Signalement : fond de carte absent en production.
+
+Diagnostic sur `https://nautibus.florent-dubut.fr/carte` :
+- L'application charge la page, les véhicules temps réel et le style OpenFreeMap. L'endpoint OpenFreeMap répond en HTTPS.
+- Console navigateur : `Error: Worker failed to load. Check that the worker URL is correct.` Le bundle demande `/assets/maplibre-gl-worker-Boc9pDRP.mjs`; cette URL renvoie 200 mais `Content-Type: application/octet-stream`. Avec le contrôle MIME des module workers (et `X-Content-Type-Options: nosniff`), le navigateur refuse le script, ce qui empêche le rendu du fond.
+
+Correction dans `frontend/nginx.conf` : bloc spécifique pour les `.mjs` avec `default_type application/javascript`, conservation des en-têtes de sécurité et du cache immuable. Aucun changement de code MapLibre ou de service externe.
+
+Vérifié :
+- Image frontend reconstruite.
+- `nginx -t` : succès.
+- Requête HTTP locale sur le worker : 200, `Content-Type: application/javascript`, `X-Content-Type-Options: nosniff`, cache immuable.
+- Navigateur sur la build locale : fond OpenFreeMap visible (rendu cartographique confirmé). La pile locale a été arrêtée ensuite avec `docker compose down`, volumes conservés.
+
+À faire pour la production : reconstruire/redéployer l'image `web` (`docker compose build web && docker compose up -d web`) et recharger la page sans cache (Ctrl+F5). La correction n'est pas encore déployée sur le serveur de production.
+
+Complément (cache navigateur) : le worker MapLibre était servi avec `Cache-Control: max-age=31536000, immutable` avant correction. Pour éviter qu'un navigateur conserve l'ancienne réponse MIME un an, `frontend/src/components/MapPanel.vue` ajoute `?v=module-mime-fix` à l'URL du worker. Image web reconstruite ; nginx renvoie le worker avec la nouvelle URL en 200 et `Content-Type: application/javascript`. Une session navigateur locale ne signale plus d'erreur de chargement du worker ; les requêtes API de cette vérification isolée échouaient en 502 faute d'API locale démarrée.

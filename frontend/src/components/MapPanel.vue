@@ -23,7 +23,7 @@ const props = defineProps<{
 const emit = defineEmits<{ selectStop: [id: string]; selectVehicle: [vehicle: VehicleView] }>()
 
 // URL du worker résolue par Vite (dev et build).
-setWorkerUrl(workerUrl)
+setWorkerUrl(`${workerUrl}?v=module-mime-fix`)
 
 const container = ref<HTMLDivElement>()
 const { dark } = useTheme()
